@@ -8,7 +8,6 @@ import os, glob, time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 
@@ -17,7 +16,7 @@ from PIL import Image
 #128 and 256 could both work but since this is a small project 128 is probably fine.
 #More than 256 would be computationally expensive and would require lots of training data.
 
-image_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/PNGs"
+image_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/PNGs_128"
 checkpoint_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/checkpoints"
 latest_checkpoint = os.path.join(checkpoint_directory, "latest.pt")
 learning_rate = 2e-4
@@ -25,24 +24,24 @@ total_steps = 100000
 diffusion_timesteps = 1000
 checkpoint_interval = 5000
 
-#building the dataset and doing some minimal data augmentation
-class FigureDataset(Dataset):
-    def __init__(self, img_dir):
-        self.paths = sorted(glob.glob(os.path.join(img_dir, "*.png"))) #find all .png files in the directory
-        self.tf = transforms.Compose([
-            transforms.RandomHorizontalFlip(p=0.5), #some minimal data augmentation just horizontal flips
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5]), #changes pixel range from 0 - 1 to -1 - 1 which is what the diffusion model wants
-        ])
+#building the dataset
+#This is different from my initial version in that it immediately loads everything to the GPU and no longer uses a pytorch dataloader
+#And I changed num_workers to 0 at the same time because they were causing an error that prevented training
+def load_images_to_gpu(img_dir):
+    paths = sorted(glob.glob(os.path.join(img_dir, "*.png"))) #find all .png files in the directory
+    print(f"Pre-loading {len(paths)} images into GPU memory...")
+    to_tensor = transforms.Compose([transforms.ToTensor()])
+    images = torch.stack([
+        to_tensor(Image.open(p).convert("L")) for p in paths
+    ])  #This creates a tensor on the CPU with shape[N, 1, 128, 128]
+    images = (images - 0.5) / 0.5  #The tensor values are pre-normalized from [0, 1] to [-1, 1] since that's what the diffusion math wants
+    images = images.to("cuda")
+    print(f"  loaded {images.element_size() * images.nelement() / 1e6:.1f} MB to GPU")
+    return images
 
-    def __len__(self): return len(self.paths)
-    def __getitem__(self, i):
-        return self.tf(Image.open(self.paths[i]).convert("L"))
-
-dataset = FigureDataset(image_directory)
-loader  = DataLoader(dataset, batch_size=64, shuffle=True,
-                     num_workers=2, drop_last=True, pin_memory=True)
-print(f"Dataset: {len(dataset)} images")
+images = load_images_to_gpu(image_directory)
+N = images.shape[0]
+print(f"Dataset: {N} images")
 
 #defining the model
 class ResBlock(nn.Module):
@@ -142,42 +141,51 @@ def load_checkpoint(model, opt, scaler):
 
 #training
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-scaler = torch.cuda.amp.GradScaler(enabled=True)
+scaler = torch.amp.GradScaler("cuda", enabled=True)
 step = load_checkpoint(model, optimizer, scaler)
 
 t0 = time.time() #this is for printing progress updates
 losses = []
 
+batch_size = 64
+
 while step < total_steps:
-    for x0 in loader:
-        if step >= total_steps:
-            break
-        x0 = x0.to("cuda")
-        t  = torch.randint(0, diffusion_timesteps, (x0.size(0),), device="cuda")
-        noise = torch.randn_like(x0)
-        xt = add_noise(x0, t, noise)
+    #this picks a random batch of indices to train on
+    idx = torch.randint(0, N, (batch_size,), device="cuda") #N is number of images and is defined when I make the dataset above
+    x0 = images[idx]
 
-        optimizer.zero_grad()
-        with torch.cuda.amp.autocast(enabled=True):
-            pred = model(xt, t)
-            loss = F.mse_loss(pred, noise)
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+    #some minimal data augmentation that just does a horizontal flip 50% of the time
+    flip_mask = torch.rand(x0.size(0), device="cuda") < 0.5
+    x0 = torch.where(flip_mask[:, None, None, None], x0.flip(-1), x0)
 
-        losses.append(loss.item())
-        step += 1
+    t = torch.randint(0, diffusion_timesteps, (x0.size(0),), device="cuda")
+    noise = torch.randn_like(x0)
+    xt = add_noise(x0, t, noise)
 
-        #printing progress updates
-        if step % 100 == 0:
-            average_loss = sum(losses[-100:]) / 100
-            time_per_100 = 100 / (time.time() - t0)
-            t0 = time.time()
-            print(f"step {step:>6}/{total_steps}  loss {average_loss:.4f}  ({time_per_100:.1f} it/s)")
+    optimizer.zero_grad()
+    with torch.amp.autocast("cuda", enabled=True):
+        pred = model(xt, t)
+        loss = F.mse_loss(pred, noise)
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
 
-        #saving checkpoints
-        if step % checkpoint_interval == 0 or step == total_steps:
-            save_checkpoint(step, model, optimizer, scaler)
-            print("Checkpoint saved")
+    losses.append(loss.item())
+    step += 1
+
+    #printing progress updates
+    if step % 100 == 0:
+        average_loss = sum(losses[-100:]) / 100
+        time_per_100 = 100 / (time.time() - t0)
+        t0 = time.time()
+        print(f"step {step:>6}/{total_steps}  loss {average_loss:.4f}  ({time_per_100:.1f} it/s)")
+
+    #saving checkpoints
+    if step % checkpoint_interval == 0 or step == total_steps:
+        save_checkpoint(step, model, optimizer, scaler)
+        print("Checkpoint saved")
+
+    if step >= total_steps:
+        break
 
 print("Done.")
