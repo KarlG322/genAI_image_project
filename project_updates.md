@@ -8,3 +8,7 @@
 - Manually removed bad data from the dataset It was originally 3000 figures but after removing things that aren't supposed to be there like the text of the body of the patent, 1 random other form, and a couple photos, it's 2948 figures. The type of document I pulled last week is really only supposed to be black and white line drawings.
 - Converted PDFs of these figures to 128x128 grayscale PNGs.
 - Made a basic diffusion model that should work on this dataset we'll see.
+
+4/28:
+- Fixed a bug with num_workers that was completely preventing training.
+- Changed the code in a few ways to try to speed it up (mainly preloading all the images to the GPU and batching the data augmentation) but that didn't make a significant difference. I'm keeping the changes since I think they're good and might try a couple other performance changes later but for now I'm just going to run it overnight since that should be enough and it has checkpointing.
