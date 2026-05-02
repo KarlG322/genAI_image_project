@@ -14,4 +14,9 @@
 - Changed the code in a few ways to try to speed it up (mainly preloading all the images to the GPU and batching the data augmentation) but that didn't make a significant difference. I'm keeping the changes since I think they're good and might try a couple other performance changes later but for now I'm just going to run it overnight since that should be enough and it has checkpointing.
 
 5/1: 
-- What I have already works decently but I'm trying increasing my training data from ~3000 to ~10000 and seeing whether that improves things much. Getting so many figures takes a few hours though due to API limits. 
+- What I have already works decently but I'm trying increasing my training data from ~3000 to ~10000 and seeing whether that improves things much. Got new figures from the API. Manually removed bad data (leaving me with 9953 images). Converted figures to 128x128 images in the right format. Trained a model on them overnight.
+
+5/2:
+- Testing the 128x128 model trained on the 9953 images, it seems like it performs pretty well, certainly better than the one trained on the 2948 images. 
+- Changed my model to use a no-offset cosine diffusion schedule instead of a linear one.
+- Trying my model out with 256x256 images as well. Converted figures to that size and started training a model.

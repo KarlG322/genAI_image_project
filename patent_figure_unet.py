@@ -4,6 +4,7 @@ That said, I did my best to make sure its understandable / that I understand it.
 I also made sure it's doing things I agree with / think make sense for this project.
 '''
 
+import math
 import os, glob, time
 import torch
 import torch.nn as nn
@@ -15,14 +16,16 @@ from PIL import Image
 #I think 64 is too small to see much.
 #128 and 256 could both work but since this is a small project 128 is probably fine.
 #More than 256 would be computationally expensive and would require lots of training data.
+#Note that a lot of the comments here assume 128x128 resolution but it should work on 256x256 as well assuming everything fits in memory
 
-image_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/PNGs_128"
-checkpoint_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/checkpoints"
+image_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/PNGs_128_9953"
+checkpoint_directory = "/content/drive/MyDrive/MSAI/spring_2026_quarter/GenAI/image_generation/checkpoints_9953"
 latest_checkpoint = os.path.join(checkpoint_directory, "latest.pt")
 learning_rate = 2e-4
 total_steps = 100000
 diffusion_timesteps = 1000
 checkpoint_interval = 5000
+batch_size = 64 #64 works for 128x128
 
 #building the dataset
 #This is different from my initial version in that it immediately loads everything to the GPU and no longer uses a pytorch dataloader
@@ -104,8 +107,18 @@ class UNet(nn.Module):
 
 model = UNet().to("cuda")
 
-#diffusion settings
-betas = torch.linspace(1e-4, 0.02, diffusion_timesteps, device="cuda") #This is a 1000 length tensor that defines how much noise is added at each timestep
+#diffusion schedule
+
+#using a cosine diffusion schedule with no offset.
+#Using an offset would probably be slightly better performance but I didn't think it was necessary for this project and not including it makes this part a bit simpler
+def cosine_alpha_bar(t, T):
+    return torch.cos(t / T * math.pi / 2) ** 2 #this is the formula to generate alpha bar which is the amount of signal in the image at a particular timestep
+t_indices = torch.arange(diffusion_timesteps + 1, device="cuda", dtype=torch.float32) #this is just a 1D tensor that counts from 0-1000.
+abar = cosine_alpha_bar(t_indices, diffusion_timesteps) #This is a 1D tensor that includes, for each timestep from 0-1000, the amount of signal in the image at that timestep
+betas = (1 - abar[1:] / abar[:-1]).clamp(max=0.999) #The math here is doing division like this [ab(1)/ab(0), ab(2)/ab(1), ..., ab(1000)/ab(999)] which generates betas from alpha bars. The clamp here prevents the betas (the % noise) from ever being 100% which would completely remove the signal.
+
+#This part of the code calculates alpha
+#I realize this part is a bit odd in that we calculated betas from alpha bar and now we're calculating alpha bar from betas. I'm just keeping this part because it's what my code did when I was using my original linear diffusion schedule and the performance impact should be negligible. Also the alpha bars used above and here are slightly different due to the clamp.
 alphas = 1.0 - betas #alphas is how much of the previous step is preserved
 alpha_bar = torch.cumprod(alphas, dim=0) #This is the cumulative product of the alphas up to a timestep. It allows us to avoid calculating all the way up to xt we can just do it all in 1 go
 sqrt_ab    = torch.sqrt(alpha_bar) #This and the line below are just calculating coefficients that will be used when adding noise so more efficient to do it once here
@@ -147,7 +160,6 @@ step = load_checkpoint(model, optimizer, scaler)
 t0 = time.time() #this is for printing progress updates
 losses = []
 
-batch_size = 64
 
 while step < total_steps:
     #this picks a random batch of indices to train on
