@@ -20,3 +20,8 @@
 - Testing the 128x128 model trained on the 9953 images, it seems like it performs pretty well, certainly better than the one trained on the 2948 images. 
 - Changed my model to use a no-offset cosine diffusion schedule instead of a linear one.
 - Trying my model out with 256x256 images as well. Converted figures to that size and started training a model.
+
+5/3:
+- The results are in and the 256x256 model is trash. Refocusing on the 9953 image 128x128 one.
+- Made my process into a coherent ipynb file instead of multiple python files and pushing to GitHub. It includes training, image generation based on the model, and image generation based on the model and a non-noise starting point for the extra criteria.
+- Tried out the image generation from a non-noise starting point and it produces pretty good results.
