@@ -1,3 +1,5 @@
+My report is in Patent_Figure_Generation.pdf.
+
 My current code is in patent_figure_unet.ipynb. Instructions for how to run it are in that file.
 
 patent_figure_unet.py is an older version of my code.
