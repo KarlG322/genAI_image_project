@@ -1,6 +1,6 @@
-My report is in Patent_Figure_Generation.pdf.
+My report is in Patent_Figure_Generation.pdf. It contains instructions for how to run the code at the end.
 
-My current code is in patent_figure_unet.ipynb. Instructions for how to run it are in that file.
+My current code is in patent_figure_unet.ipynb. 
 
 patent_figure_unet.py is an older version of my code.
 
